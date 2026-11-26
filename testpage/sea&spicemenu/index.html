@@ -466,6 +466,7 @@ const L = {
   shop_closed:{cn:'餐厅目前未营业，暂时无法下单',en:'The restaurant is closed right now — orders are paused'},
   order_unmapped:{cn:'有品项暂时无法送到厨房，请联系服务员',en:'Some items can\'t be sent to the kitchen — please ask our staff'},
   order_fail:{cn:'送单失败，请再试一次或联系服务员',en:'Your order wasn\'t sent — please try again or ask our staff'},
+  order_more:{cn:'继续点餐 →',en:'Order more →'},
   toast_sent:{cn:'已送到厨房 ✓',en:'Sent to the kitchen ✓'},
   placing:{cn:'送单中…',en:'Sending…'},
   bill_t:{cn:'本桌已点',en:'Ordered at this table'}, bill_sm:{cn:'桌号 {0}',en:'TABLE {0}'},
@@ -1404,7 +1405,9 @@ function scrOrders(){
   const histSection = live ? (hasHist ? tableBillSection(hasCart?20:10) : '') : hasHist ? `
     <div class="seclbl2" style="padding:${hasCart?'20':'10'}px 18px 0">${t('sec_hist')} <small>ORDER HISTORY · ${S.orders.length}</small></div>
     <div class="histlist">${S.orders.map(orderCard).join('')}</div>` : '';
-  return `<div class="screen scroll">${topbar()}${cartSection}${histSection}</div>`;
+  // After ordering, the way back to the menu — same table, nothing to re-enter.
+  const moreCta = (!hasCart && hasHist) ? `<div class="cartcta"><button class="cta" onclick="go('hub')">${t('order_more')}</button></div>` : '';
+  return `<div class="screen scroll">${topbar()}${cartSection}${histSection}${moreCta}</div>`;
 }
 function toast(msg,ms){
   let t=document.getElementById('toast'); if(!t){ t=document.createElement('div'); t.id='toast'; t.className='toast'; document.body.appendChild(t); }
