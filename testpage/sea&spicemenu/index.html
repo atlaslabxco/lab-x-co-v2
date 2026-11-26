@@ -75,6 +75,15 @@
   .pax-subline{margin-top:24px;font-size:13px;color:var(--muted)}
   .pax-subline b{font-family:var(--cor);font-size:23px;color:var(--gold2);font-weight:700;vertical-align:middle;margin:0 2px}
   .pax-subline .calc{color:var(--muted2);font-size:12px}
+  .tbl-row{display:flex;align-items:center;justify-content:center;gap:14px;width:100%}
+  .tbl-lbl{font-size:20px;font-weight:700;color:var(--gold2);font-family:var(--ser)}
+  .tbl-in{width:128px;height:50px;border-radius:14px;border:1px solid var(--line2);background:rgba(0,0,0,.3);
+    color:var(--gold2);font-family:var(--cor);font-size:30px;font-weight:700;text-align:center;letter-spacing:4px;outline:none;padding:0}
+  .tbl-in:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(233,196,119,.15)}
+  .tbl-in::placeholder{font-family:var(--ser);font-size:15px;font-weight:400;letter-spacing:0;color:var(--muted2)}
+  .tbl-hint{font-size:12px;color:var(--muted2);margin-top:7px;min-height:16px;text-align:center}
+  .tbl-hint.err{color:#ffab95}
+  .tbl-div{width:100%;height:1px;background:var(--line);margin:18px 0 20px}
   .hero{margin:6px 18px 0;border-radius:22px;padding:22px;position:relative;overflow:hidden;min-height:212px;
     display:flex;flex-direction:column;align-items:flex-start;
     border:1px solid rgba(247,218,136,.5);box-shadow:0 14px 36px rgba(0,0,0,.5),inset 0 0 0 1px rgba(247,218,136,.12)}
@@ -391,7 +400,30 @@ const PLACE_ICON=`<svg viewBox="0 0 24 24" fill="none" stroke="#cda968" stroke-w
 const CHILI=`<img class="chili" src="assets/icons/chili.png" alt="">`;
 const chiliRow=n=>`<span class="chilis">${CHILI.repeat(n)}</span>`;
 
+// 桌号 — the customer keys it in on the first screen. A link with ?table=205
+// (e.g. a QR sticker later) prefills it. Kept per browser tab in sessionStorage,
+// so a refresh keeps it but a new visit asks again.
+// Tables from the POS floor plan (Indoor): 1–21 plus 16A; 20 = 包1, 21 = 包2.
+// "Spare" is not a seating table. Whether POS expects these names or a separate
+// tabNo is still to be confirmed with ArmLoop — if it differs, map it here.
+const TABLES=['1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','16A','17','18','19','20','21','TEST'];
+// TEST — for us and the restaurant to try the full flow. Orders on it must be
+// marked so the kitchen never prepares them (the order builder adds TEST_NOTE).
+// Which POS table it lands on is to be agreed with ArmLoop.
+const TEST_TABLE='TEST', TEST_NOTE='LABX TEST - DO NOT PREPARE 测试单请勿制作';
+const isTestTable=()=>S.table===TEST_TABLE;
+function validTable(v){
+  v=String(v==null?'':v).trim().toUpperCase().replace(/^0+(?=\d)/,'');   // "05" -> "5", "16a" -> "16A"
+  return TABLES.includes(v) ? v : '';
+}
+function initialTable(){
+  const q=validTable(new URLSearchParams(location.search).get('table'));
+  if(q) return q;
+  try{ return validTable(sessionStorage.getItem('seaspice_table')); }catch(e){ return ''; }
+}
+
 const S = {
+  table: initialTable(),              // '' until the customer enters a valid table number
   lang: (function(){ try{ return localStorage.getItem('seaspice_lang')||'cn'; }catch(e){ return 'cn'; } })(),
   pax:2, screen:'pax', tab:'menu', addonTab:M.addonCats[0],
   order:{fish:null,numb:1,spicy:1,cook:1,broth:0,dish:'鱼火锅',mode:'fhp'},
@@ -423,6 +455,12 @@ const L = {
   pax_sub:{cn:'调料费小计',en:'Condiments subtotal'},
   pax_calc:{cn:'· {0}位 × {1}',en:'· {0} × {1}'},
   pax_cta:{cn:'开始点单 →',en:'Start ordering →'},
+  tbl_q:{cn:'桌号',en:'Table'},
+  tbl_ph:{cn:'例如 12',en:'e.g. 12'},
+  tbl_hint:{cn:'请输入桌上标示的桌号',en:'Enter the number shown on your table'},
+  tbl_err:{cn:'没有这个桌号，请看桌上的标示',en:'Table not found — check the number on your table'},
+  tbl_need:{cn:'请先输入桌号',en:'Please enter your table number first'},
+  tbl_testbar:{cn:'测试桌 · 订单会标示「请勿制作」',en:'Test table · orders are marked DO NOT PREPARE'},
   /* hub */
   member_t:{cn:'会员查询 Member',en:'Member Lookup'},
   member_s:{cn:'输入手机号查积分 · 余额',en:'Check points & balance by phone'},
@@ -592,7 +630,7 @@ function topbar(){
   return `<div class="topbar">
     <div class="brand"><span class="cn">Sea &amp; Spice</span></div>
     <div class="spacer"></div>
-    <span class="chip">${t('table_no',M.table)}</span><span class="chip lang" onclick="toggleLang()">${S.lang==='cn'?'中 / <b>EN</b>':'<b>中</b> / EN'}</span></div>`;
+    <span class="chip" onclick="go('pax')">${t('table_no',S.table||'—')}</span><span class="chip lang" onclick="toggleLang()">${S.lang==='cn'?'中 / <b>EN</b>':'<b>中</b> / EN'}</span></div>`;
 }
 
 function scrPax(){
@@ -606,6 +644,11 @@ function scrPax(){
     </div>
     <div class="pax-body">
       <div class="pax-card">
+        <div class="tbl-row"><label class="tbl-lbl" for="tblin">${t('tbl_q')}</label>
+          <input id="tblin" class="tbl-in" type="text" maxlength="4" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done"
+            placeholder="${t('tbl_ph')}" value="${S.tableDraft!=null?S.tableDraft:S.table}" oninput="tableInput(this)"></div>
+        <div class="tbl-hint" id="tblhint">${t('tbl_hint')}</div>
+        <div class="tbl-div"></div>
         <div class="pax-q">${t('pax_q')}</div>
         <div class="pax-note">${t('pax_note',money(cp))}</div>
         <div class="stepper">
@@ -617,9 +660,42 @@ function scrPax(){
         <div class="pax-subline">${t('pax_sub')} <b>${money(sub)}</b>${C} <span class="calc">${t('pax_calc',S.pax,money(cp))}</span></div>
       </div>
     </div>
-    <div class="pax-foot"><button class="cta pax-cta" onclick="go('hub')">${t('pax_cta')}</button></div></div>`;
+    <div class="pax-foot"><button class="cta pax-cta ${validTable(S.tableDraft!=null?S.tableDraft:S.table)?'':'disabled'}" id="paxcta" onclick="startOrder()">${t('pax_cta')}</button></div></div>`;
 }
 window.setPax=function(n){ S.pax=Math.max(1,n); render(); }
+// Typing must not re-render (that would drop focus and the keyboard) — update in place.
+window.tableInput=function(el){
+  const v=el.value.toUpperCase().replace(/[^0-9A-Z]/g,'').slice(0,4);
+  if(el.value!==v) el.value=v;
+  S.tableDraft=v;
+  const ok=!!validTable(v), hint=document.getElementById('tblhint');
+  document.getElementById('paxcta').classList.toggle('disabled',!ok);
+  // only complain once the entry can no longer become a valid table (e.g. "25", "9X")
+  const bad=!!v && !ok && !TABLES.some(x=>x.startsWith(v));
+  hint.textContent=bad?t('tbl_err'):t('tbl_hint');
+  hint.classList.toggle('err',bad);
+}
+function markTestTable(){
+  let b=document.getElementById('testtablebar');
+  if(!isTestTable()){ if(b) b.remove(); document.body.classList.toggle('testmode',TESTMODE); return; }
+  if(!b){ b=document.createElement('div'); b.id='testtablebar'; b.className='testbar'; document.body.appendChild(b); }
+  b.textContent=t('tbl_testbar');
+  document.body.classList.add('testmode');
+}
+window.startOrder=function(){
+  const v=validTable(S.tableDraft!=null?S.tableDraft:S.table);
+  if(!v){
+    const hint=document.getElementById('tblhint'), el=document.getElementById('tblin');
+    const typed=(S.tableDraft!=null?S.tableDraft:S.table)||'';
+    hint.textContent=typed?t('tbl_err'):t('tbl_need'); hint.classList.add('err');
+    if(el) el.focus();
+    return;
+  }
+  S.table=v; S.tableDraft=null;
+  try{ sessionStorage.setItem('seaspice_table',v); }catch(e){}
+  markTestTable();
+  go('hub');
+}
 
 function scrHub(){
   return `<div class="screen scroll">${topbar()}
@@ -796,7 +872,7 @@ function scrPkgConfirm(){
       <span class="upgtick ${up?'on':''}">${up?'✓':''}</span></div>` : '';
   return `<div class="screen scroll">
     <div class="backrow"><button class="back" onclick="${p.fixed?"go('hub')":"pkgEditBack()"}">${t('back')}</button>
-      <div><div class="htitle">${t('conf_t')}</div><div class="hsub">${t('table_no',M.table)}</div></div></div>
+      <div><div class="htitle">${t('conf_t')}</div><div class="hsub">${t('table_no',S.table)}</div></div></div>
     <div class="conf"><div class="mainrow"><span class="nm">${nm(p)}</span><span class="pr">${money(p.price)} ${C}</span></div>
       ${lines}<div class="line"><span>${t('l_cond_simple')}</span><span class="v">${t('v_cond_incl')}</span></div>
       ${p.time?`<div class="line"><span>${t('l_service')}</span><span class="v">${pkgTime(p)}</span></div>`:''}</div>
@@ -1069,7 +1145,7 @@ function orderTotal(){
 function confirmShell(title,detailHtml){
   return `<div class="screen scroll">
     <div class="backrow"><button class="back" onclick="go('addons')">${t('back')}</button>
-      <div><div class="htitle">${t('conf_t')}</div><div class="hsub">${t('table_no',M.table)}</div></div></div>
+      <div><div class="htitle">${t('conf_t')}</div><div class="hsub">${t('table_no',S.table)}</div></div></div>
     <div class="conf">${detailHtml}</div>
     <div class="total"><div class="tl">${t('total')}</div><div class="tv">${money(orderTotal())}<small>${t('total_note',C)}</small></div></div>
     <div class="footer"><button class="cta" onclick="addOrderToCart()">${t('add_cart')}</button></div></div>`;
@@ -1098,7 +1174,7 @@ function scrConfirm(){
     <span class="v">${l.unit==null?t('mkt_price'):money(l.amount)+' '+C}</span></div>`).join('');
   return `<div class="screen scroll">
     <div class="backrow"><button class="back" onclick="go('addons')">${t('back')}</button>
-      <div><div class="htitle">${t('conf_t')}</div><div class="hsub">${t('table_no',M.table)}</div></div></div>
+      <div><div class="htitle">${t('conf_t')}</div><div class="hsub">${t('table_no',S.table)}</div></div></div>
     <div class="conf"><div class="ch">${t('ch_main')}</div>
       <div class="mainrow"><span class="nm">${dishName(S.order.dish)} · ${nm(f)}</span><span class="pr">${money(f.price)} ${C}</span></div>
       <div class="line"><span>${t('l_spice')}</span><span class="v">${nm(NUMB[S.order.numb])} · ${nm(SPICY[S.order.spicy])}</span></div>
@@ -1205,6 +1281,7 @@ window.cartQty=function(cid,d){ const c=S.cart.find(x=>x.cid===cid); if(!c)retur
 window.cartRemove=function(cid){ S.cart=S.cart.filter(x=>x.cid!==cid); render(); }
 window.placeOrder=async function(){
   if(!S.cart.length)return;
+  if(!S.table){ toast(t('tbl_need')); go('pax'); return; }   // every order must carry a table
   // Checkout is the one refresh that is mandatory, not best-effort — this is the
   // last chance to catch something that sold out mid-order. AVAILABILITY-PLAN §3.
   if(MenuSource.live()){
@@ -1256,7 +1333,7 @@ function scrOrders(){
   </div>` : '';
   const cartSection = hasCart ? `
     ${soldBanner}
-    <div class="seclbl2" style="padding:10px 18px 0">${t('sec_cart')} <small>${t('sec_cart_sm',M.table)}</small></div>
+    <div class="seclbl2" style="padding:10px 18px 0">${t('sec_cart')} <small>${t('sec_cart_sm',S.table)}</small></div>
     <div class="cartlist">${S.cart.map(cartRow).join('')}</div>
     <div class="cartsum">
       <div class="srow"><span>${t('subtotal')}</span><span>${money(items)} ${C}</span></div>
@@ -1319,6 +1396,7 @@ function boot(menu){
   S.addonTab = M.addonCats[0];
   reconcileSelections();
   mountShell();
+  markTestTable();
   render();
 }
 MenuSource.load().then(boot);
