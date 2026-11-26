@@ -248,6 +248,13 @@
   .gcell .ge{font-size:26px}
   .gcell .chilis{display:inline-flex;gap:4px;align-items:flex-end;justify-content:center}
   .gcell .chili{height:36px;width:auto;filter:drop-shadow(0 2px 5px rgba(201,127,31,.45))}
+  .grid3 .gcell .rec,.grid2 .gcell .rec{white-space:nowrap}
+  @media (max-width:380px){          /* narrow phones: 3 chillies and the 推荐/Recommended tag must fit a 98px cell */
+    .gcell .chili{height:30px}
+    .gcell .chilis{gap:2px}
+    .grid3 .gcell .rec{font-size:10px;padding:1px 4px;letter-spacing:-.2px}
+    .grid3 .gcell .gt{font-size:15px}
+  }
   .opt .emoji svg{width:34px;height:34px;opacity:.6}
   .acard .aemoji svg{width:40px;height:40px;opacity:.55}
   .placeholder .pe svg{width:48px;height:48px;opacity:.6}
