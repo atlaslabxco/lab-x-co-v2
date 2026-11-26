@@ -50,7 +50,8 @@
   .htitle{font-size:20px;font-weight:700;color:var(--gold2)}
   .hsub{font-size:12px;color:var(--muted2);margin-top:2px}
   .footer{position:sticky;bottom:0;padding:14px 18px calc(14px + env(safe-area-inset-bottom));background:linear-gradient(0deg,#480a11 70%,transparent)}
-  .pax-wrap{flex:1;display:flex;flex-direction:column}
+  .pax-wrap{flex:1;display:flex;flex-direction:column;min-height:0;height:100%}
+  .pax-scroll{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column}
   .welcome{position:relative;padding:34px 20px 2px;text-align:center}
   .welcome .langbtn{position:absolute;top:24px;right:20px;border:1px solid var(--line2);color:var(--gold);background:rgba(0,0,0,.2);border-radius:11px;padding:7px 13px;font-size:13px;font-family:var(--ser);cursor:pointer}
   .welcome .wlogo{width:138px;height:138px;border-radius:30px;box-shadow:0 12px 30px rgba(0,0,0,.55);border:1px solid rgba(247,218,136,.25)}
@@ -59,7 +60,7 @@
   .wtitle .orn{height:17px;opacity:.92}
   .wtitle .orn.flip{transform:scaleX(-1)}
   .pax-body{flex:1;display:flex;align-items:center;justify-content:center;padding:10px 22px}
-  .pax-foot{padding:6px 22px calc(22px + env(safe-area-inset-bottom))}
+  .pax-foot{flex:none;padding:10px 22px calc(18px + env(safe-area-inset-bottom));background:linear-gradient(0deg,#3a070d 60%,transparent)}
   .pax-cta{margin-top:0}
   .pax-card{width:100%;background:linear-gradient(180deg,rgba(122,20,28,.5),rgba(74,10,17,.28));border:1px solid var(--line2);border-radius:24px;padding:28px 22px 26px;display:flex;flex-direction:column;align-items:center;box-shadow:0 14px 34px rgba(0,0,0,.4),inset 0 1px 0 rgba(247,218,136,.12)}
   .pax-q{font-size:25px;font-weight:700;color:var(--gold2);font-family:var(--ser)}
@@ -87,6 +88,36 @@
   .tbl-hint{font-size:12px;color:var(--muted2);margin-top:7px;min-height:16px;text-align:center}
   .tbl-hint.err{color:#ffab95}
   .tbl-div{width:100%;height:1px;background:var(--line);margin:18px 0 20px}
+  /* Shorter phones (and Safari/WeChat with their bars showing): tighten the
+     welcome screen so table, guests and the start button fit without scrolling. */
+  @media (max-height:780px){
+    .welcome{padding-top:16px}
+    .welcome .wlogo{width:96px;height:96px;border-radius:22px}
+    .welcome .langbtn{top:14px}
+    .wtitle{margin-top:10px}
+    .pax-body{padding:8px 22px}
+    .pax-card{padding:18px 20px 16px}
+    .tbl-div{margin:12px 0 14px}
+    .pax-q{font-size:22px}
+    .pax-note{margin-bottom:14px}
+    .stepbtn{width:46px;height:46px}
+    .pax-num{font-size:46px}
+    .presets{margin-top:14px}
+    .pax-subline{margin-top:14px}
+  }
+  @media (max-height:640px){
+    .welcome{padding-top:10px}
+    .welcome .wlogo{width:64px;height:64px;border-radius:16px}
+    .wtitle{margin-top:6px}
+    .wtitle .txt{font-size:18px}
+    .pax-card{padding:14px 18px 12px}
+    .tbl-in{height:44px;font-size:26px}
+    .tbl-div{margin:8px 0 10px}
+    .pax-note{margin-bottom:10px}
+    .presets{margin-top:10px}
+    .preset{width:40px;height:40px}
+    .pax-subline{margin-top:10px}
+  }
   .hero{margin:6px 18px 0;border-radius:22px;padding:22px;position:relative;overflow:hidden;min-height:212px;
     display:flex;flex-direction:column;align-items:flex-start;
     border:1px solid rgba(247,218,136,.5);box-shadow:0 14px 36px rgba(0,0,0,.5),inset 0 0 0 1px rgba(247,218,136,.12)}
@@ -649,7 +680,7 @@ function topbar(){
 function scrPax(){
   const cp=M.condiment.price, sub=S.pax*cp;
   const presets=[1,2,3,4,5,6].map(n=>`<div class="preset ${S.pax===n?'on':''}" onclick="setPax(${n})">${n}</div>`).join('');
-  return `<div class="screen pax-wrap">
+  return `<div class="screen pax-wrap"><div class="pax-scroll scroll">
     <div class="welcome">
       <button class="langbtn" onclick="toggleLang()">${S.lang==='cn'?'中文 ▾':'English ▾'}</button>
       <img class="wlogo" src="assets/logo.png" alt="Sea & Spice">
@@ -659,7 +690,7 @@ function scrPax(){
       <div class="pax-card">
         <div class="tbl-row"><label class="tbl-lbl" for="tblin">${t('tbl_q')}</label>
           <input id="tblin" class="tbl-in" type="text" maxlength="4" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done"
-            placeholder="${t('tbl_ph')}" value="${S.tableDraft!=null?S.tableDraft:S.table}" oninput="tableInput(this)"></div>
+            placeholder="${t('tbl_ph')}" value="${S.tableDraft!=null?S.tableDraft:S.table}" oninput="tableInput(this)" onkeydown="if(event.key==='Enter')this.blur()"></div>
         <div class="tbl-hint" id="tblhint">${t('tbl_hint')}</div>
         <div class="tbl-div"></div>
         <div class="pax-q">${t('pax_q')}</div>
@@ -672,7 +703,7 @@ function scrPax(){
         <div class="presets">${presets}</div>
         <div class="pax-subline">${t('pax_sub')} <b>${money(sub)}</b>${C} <span class="calc">${t('pax_calc',S.pax,money(cp))}</span></div>
       </div>
-    </div>
+    </div></div>
     <div class="pax-foot"><button class="cta pax-cta ${validTable(S.tableDraft!=null?S.tableDraft:S.table)?'':'disabled'}" id="paxcta" onclick="startOrder()">${t('pax_cta')}</button></div></div>`;
 }
 window.setPax=function(n){ S.pax=Math.max(1,n); render(); }
