@@ -77,6 +77,8 @@
   .pax-subline{margin-top:24px;font-size:13px;color:var(--muted)}
   .pax-subline b{font-family:var(--cor);font-size:23px;color:var(--gold2);font-weight:700;vertical-align:middle;margin:0 2px}
   .pax-subline .calc{color:var(--muted2);font-size:12px}
+  .mtest{display:inline-block;background:#3C5A6E;color:#fff;font-size:11px;font-weight:700;letter-spacing:.06em;padding:3px 8px;border-radius:4px;margin-bottom:10px}
+  .mtesthint{display:inline-block;background:rgba(60,90,110,.55);color:#e6f0f6;font-size:12px;padding:5px 10px;border-radius:8px;margin:-8px 0 14px;font-family:var(--ser)}
   .memline{margin:10px 18px 0;padding:10px 14px;border:1px dashed var(--line2);border-radius:12px;font-size:13px;color:var(--gold);text-align:center;cursor:pointer}
   .billnote{padding:8px 18px 0;font-size:12px;color:var(--muted2);text-align:center}
   .bopts{display:block;font-size:12px;color:var(--muted2);margin-top:2px}
@@ -605,6 +607,9 @@ const L = {
   me_other:{cn:'登出',en:'Log out'},
   me_linked:{cn:'本桌订单会累积积分，于柜台结账后入账',en:'Orders from this phone earn points, added when the bill is paid'},
   me_na:{cn:'—',en:'—'},
+  me_testcard:{cn:'测试会员 · 测试资料',en:'TEST MEMBER · sample data'},
+  me_testname:{cn:'测试会员',en:'Test Member'},
+  me_testhint:{cn:'测试帐号：{0} / {1}',en:'Test login: {0} / {1}'},
   me_cart_on:{cn:'会员 {0} · 积分于结账后入账',en:'Member {0} · points added after payment'},
   me_cart_off:{cn:'登入会员，结账后累积积分 →',en:'Log in to earn points on this order →'},
   me_points:{cn:'积分 Points',en:'Points'}, me_balance:{cn:'余额 Balance',en:'Balance'},
@@ -757,6 +762,7 @@ window.startOrder=function(){
     return;
   }
   S.table=v; S.tableDraft=null;
+  if(S.member&&S.member.test&&v!==TEST_TABLE){ S.member=null; saveMember(); }
   try{ sessionStorage.setItem('seaspice_table',v); }catch(e){}
   markTestTable();
   S.bill=null; loadTableBill();
@@ -1272,6 +1278,11 @@ function scrTab(tab){
 }
 
 // ---- 会员 Member (POS login) ----
+// Test login: lets us try the member screens before the POS is connected.
+// Only on the TEST table (or ?test=1) AND only while the POS link is off, so a
+// customer at a real table can never reach it, and it disappears once live.
+const TEST_MEMBER={phone:'0400000000', pw:'test1234'};
+const testLoginOn=()=>!MenuSource.live() && (S.table===TEST_TABLE || TESTMODE);
 // Phone + password against the POS. After login every order from this phone
 // carries the member's userId, and the POS credits points when the table's bill
 // is settled at the counter. Nothing here is made up: with the POS link off the
@@ -1282,6 +1293,7 @@ function scrMe(){
   if(m){
     const r=S.pointsRule;
     body=`<div class="mcard">
+      ${m.test?`<div class="mtest">${t('me_testcard')}</div>`:''}
       <div class="top"><div class="nm">${m.name||t('me_member')}</div><div class="ph">${m.mobile||''}</div></div>
       <div class="stats">
         <div class="st"><div class="lab">${t('me_points')}</div><div class="val">${m.points!=null?Math.floor(m.points):t('me_na')}</div></div>
@@ -1290,9 +1302,10 @@ function scrMe(){
       <div class="note">${t('me_linked')}${r&&r.perDollar?'<br>'+t('me_rule',r.perDollar,r.redeemPer):''}</div></div>
     <button class="cta" onclick="memberLogout()">${t('me_other')}</button>`;
   } else {
-    const off=!live, busy=S.memberBusy;
+    const tl=testLoginOn(), off=!live && !tl, busy=S.memberBusy;
     body=`<div class="mlook">
       <div class="t">${t('me_t')}</div><div class="s">${off?t('me_off'):t('me_s')}</div>
+      ${tl?`<div class="mtesthint">${t('me_testhint',TEST_MEMBER.phone,TEST_MEMBER.pw)}</div>`:''}
       <input id="m_phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="${t('me_ph')}" ${off?'disabled':''}>
       <input id="m_pw" type="password" autocomplete="current-password" placeholder="${t('me_pw')}" style="margin-top:10px" ${off?'disabled':''}
         onkeydown="if(event.key==='Enter')doLogin()">
@@ -1306,10 +1319,17 @@ function scrMe(){
 }
 function saveMember(){ try{ S.member?sessionStorage.setItem('seaspice_member',JSON.stringify(S.member)):sessionStorage.removeItem('seaspice_member'); }catch(e){} }
 window.doLogin=async function(){
-  if(S.memberBusy || !MenuSource.live()) return;
+  const tl=testLoginOn();
+  if(S.memberBusy || (!MenuSource.live() && !tl)) return;
   const phone=((document.getElementById('m_phone')||{}).value||'').replace(/\D/g,'');
   const pw=(document.getElementById('m_pw')||{}).value||'';
   if(!phone||!pw){ S.memberErr=t('me_need'); render(); return; }
+  if(tl){                                   // test login — never reaches the POS
+    if(phone!==TEST_MEMBER.phone || pw!==TEST_MEMBER.pw){ S.memberErr=t('me_err'); render(); return; }
+    S.member={userId:'TEST', name:t('me_testname'), mobile:phone, points:1240, balance:50, test:true};
+    S.pointsRule={on:true, perDollar:1, redeemPer:10, minimum:10};
+    S.memberErr=''; saveMember(); render(); return;
+  }
   S.memberBusy=true; S.memberErr=''; render();
   try{
     const r=await PosOrder.memberSignIn(phone,pw);
@@ -1322,7 +1342,7 @@ window.doLogin=async function(){
 }
 // Points/balance and the shop's rule — shown, never calculated here.
 function refreshMember(){
-  if(!S.member || !MenuSource.live()) return;
+  if(!S.member || S.member.test || !MenuSource.live()) return;
   const id=S.member.userId;
   PosOrder.memberPoints(id).then(p=>{ if(!S.member||S.member.userId!==id||!p)return; S.member.points=p.points; S.member.balance=p.balance; saveMember(); if(S.screen==='me')render(); });
   if(!S.pointsRule) PosOrder.pointsRule().then(r=>{ S.pointsRule=r; if(S.screen==='me')render(); });
@@ -1401,7 +1421,7 @@ async function sendToPos(){
     try{
       built=PosOrder.build(S.cart,{ table:S.table, pax:S.pax, lang:S.lang, menu:M,
         fees:{potFee:M.potFee, coldBase:DIRECT_BASE, upgrade:DIRECT_UPGRADE},
-        condimentQty: cond>0?S.pax:0, appTotal: cartItemsTotal()+cond, member: S.member });
+        condimentQty: cond>0?S.pax:0, appTotal: cartItemsTotal()+cond, member: S.member&&!S.member.test?S.member:null });
     }catch(e){ console.error('[order] build failed:',e.unmapped||e); toast(t('order_unmapped'),4500); return; }
     const res=await PosOrder.submit(built.body);
     if(!res.ok){ toast(t('order_fail'),4500); return; }
