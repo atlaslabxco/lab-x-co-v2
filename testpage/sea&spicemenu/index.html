@@ -225,9 +225,9 @@
   .opt .pr small{display:block;font-size:12px;color:var(--gold-d);font-family:var(--ser)}
   .radio{width:24px;height:24px;border-radius:50%;border:2px solid var(--line2);flex:none}
   .opt.sel .check{background:linear-gradient(180deg,#f7da88,#c8923c);border:none;display:flex;align-items:center;justify-content:center;color:#5a0f12;font-weight:900}
-  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;padding:6px 18px}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:6px 18px}
-  .gcell{background:linear-gradient(180deg,rgba(106,16,24,.8),rgba(74,10,17,.6));border:1px solid var(--line);border-radius:16px;padding:18px 10px;text-align:center;cursor:pointer;position:relative}
+  .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:6px 18px}
+  .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:6px 18px}
+  .gcell{background:linear-gradient(180deg,rgba(106,16,24,.8),rgba(74,10,17,.6));border:1px solid var(--line);border-radius:16px;padding:18px 8px;text-align:center;cursor:pointer;position:relative;overflow-wrap:anywhere}
   .gcell.sel{border-color:var(--gold);background:linear-gradient(180deg,#a8312a,#7a1414);box-shadow:0 0 0 1px var(--gold)}
   /* 暂时售完 — POS available:0, or absent from the POS channel feed */
   .so{position:relative;opacity:.42;filter:grayscale(.75)}
