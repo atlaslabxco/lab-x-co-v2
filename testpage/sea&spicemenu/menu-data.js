@@ -833,7 +833,7 @@ window.SEASPICE = {
    "id": "s4",
    "cn": "年糕",
    "en": "Rice Cake",
-   "price": 6.8,
+   "price": 8.8,
    "cat": "素菜",
    "hot": false,
    "half": false,

@@ -7,8 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700;900&family=Cormorant+Garamond:wght@500;600;700&display=swap" rel="stylesheet">
-<script src="menu-data.js?v=32"></script>
-<script src="menu-source.js?v=4"></script>
+<script src="menu-data.js?v=33"></script>
+<script src="menu-source.js?v=5"></script>
+<script src="pos-order.js?v=1"></script>
 <script src="menu-test.js?v=1"></script>  <!-- POS 结构验证用；只在 ?test=1 时载入到菜单 -->
 <style>
   :root{
@@ -75,6 +76,8 @@
   .pax-subline{margin-top:24px;font-size:13px;color:var(--muted)}
   .pax-subline b{font-family:var(--cor);font-size:23px;color:var(--gold2);font-weight:700;vertical-align:middle;margin:0 2px}
   .pax-subline .calc{color:var(--muted2);font-size:12px}
+  .billnote{padding:8px 18px 0;font-size:12px;color:var(--muted2);text-align:center}
+  .bopts{display:block;font-size:11px;color:var(--muted2);margin-top:2px}
   .tbl-row{display:flex;align-items:center;justify-content:center;gap:14px;width:100%}
   .tbl-lbl{font-size:20px;font-weight:700;color:var(--gold2);font-family:var(--ser)}
   .tbl-in{width:128px;height:50px;border-radius:14px;border:1px solid var(--line2);background:rgba(0,0,0,.3);
@@ -460,6 +463,15 @@ const L = {
   tbl_hint:{cn:'请输入桌上标示的桌号',en:'Enter the number shown on your table'},
   tbl_err:{cn:'没有这个桌号，请看桌上的标示',en:'Table not found — check the number on your table'},
   tbl_need:{cn:'请先输入桌号',en:'Please enter your table number first'},
+  shop_closed:{cn:'餐厅目前未营业，暂时无法下单',en:'The restaurant is closed right now — orders are paused'},
+  order_unmapped:{cn:'有品项暂时无法送到厨房，请联系服务员',en:'Some items can\'t be sent to the kitchen — please ask our staff'},
+  order_fail:{cn:'送单失败，请再试一次或联系服务员',en:'Your order wasn\'t sent — please try again or ask our staff'},
+  toast_sent:{cn:'已送到厨房 ✓',en:'Sent to the kitchen ✓'},
+  placing:{cn:'送单中…',en:'Sending…'},
+  bill_t:{cn:'本桌已点',en:'Ordered at this table'}, bill_sm:{cn:'桌号 {0}',en:'TABLE {0}'},
+  bill_total:{cn:'已点合计',en:'Ordered so far'},
+  bill_pay:{cn:'用餐完毕请到柜台结账',en:'Please pay at the counter when you\'re done'},
+  bill_err:{cn:'暂时无法读取本桌订单',en:'Couldn\'t load this table\'s orders'},
   tbl_testbar:{cn:'测试桌 · 订单会标示「请勿制作」',en:'Test table · orders are marked DO NOT PREPARE'},
   /* hub */
   member_t:{cn:'会员查询 Member',en:'Member Lookup'},
@@ -624,7 +636,7 @@ function updateNav(){
 function updateCartBadge(){ const b=document.getElementById('navbadge'); if(!b)return; const n=S.cart.reduce((s,c)=>s+c.qty,0); b.textContent=n>99?'99+':n; b.classList.toggle('show',n>0); }
 window.switchTab=function(i){ go(TABS[i].screen); }
 function go(s){ S.screen=s; render(); const sc=screenEl.querySelector('.scroll'); if(sc)sc.scrollTop=0;
-  if(s==='orders') refreshMenu('cart'); }
+  if(s==='orders'){ refreshMenu('cart'); loadTableBill(); } }
 
 function topbar(){
   return `<div class="topbar">
@@ -694,6 +706,7 @@ window.startOrder=function(){
   S.table=v; S.tableDraft=null;
   try{ sessionStorage.setItem('seaspice_table',v); }catch(e){}
   markTestTable();
+  S.bill=null; loadTableBill();
   go('hub');
 }
 
@@ -1256,16 +1269,17 @@ window.addOrderToCart=function(){
     const brothTxt = direct ? (b?t('cart_upg',nm(b)):t('cart_plain')) : t('cart_inner',nm(b));
     const sub=`${nm(NUMB[S.order.numb])}·${nm(SPICY[S.order.spicy])} · ${nm(COOK[S.order.cook])} · ${brothTxt}`;
     pushCart({type:'fish',title:`${dishName(S.order.dish)} · ${nm(f)}`,sub,img:f.img,qty:1,unit,needsCondiment:true,
-      ref:{kind:'fish',id:f.id}});
+      ref:{kind:'fish',id:f.id,dish:S.order.dish,mode:S.order.mode,numb:NUMB[S.order.numb].k,spicy:SPICY[S.order.spicy].k,
+           cook:COOK[S.order.cook].k,broth:b?b.id:null}});
   } else if(S.flow==='hotpot' && S.hp.potType){
     const pot=POTS.find(p=>p.id===S.hp.potType);
     const broths=S.hp.broths.map(id=>nm(BROTHS.find(b=>b.id===id))).join(S.lang==='en'?', ':'、');
     pushCart({type:'hotpot',title:t('diy_pot',pot?nm(pot):''),sub:t('cart_broth',broths),img:'assets/menu/0112.jpg',qty:1,unit:M.potFee,needsCondiment:true,
-      ref:{kind:'hotpot',broths:S.hp.broths.slice()}});
+      ref:{kind:'hotpot',broths:S.hp.broths.slice(),potName:pot?pot.cn:''}});
   }
   addonLineItems().forEach(l=>pushCart({type:'addon',key:`addon|${l.it.id}|${l.por}`,
     title:nm(l.it)+(l.por==='half'?t('half_suffix'):''),sub:t('sub_addon'),img:l.it.img,qty:l.qty,unit:l.unit,needsCondiment:false,
-    ref:{kind:'addon',id:l.it.id}}));
+    ref:{kind:'addon',id:l.it.id,por:l.por}}));
   resetOrder(); toast(t('toast_cart')); go('orders');
 }
 window.addPkgToCart=function(){
@@ -1274,14 +1288,16 @@ window.addPkgToCart=function(){
   const unit = p.price + (up?p.drinkUp.price:0);
   const sub = p.fixed ? (t('sub_pkg')+(up?t('sub_upgrade',nm(p.drinkUp)):''))
     : p.groups.map((g,i)=>{const sel=S.pkgSel[i]; return g.pick>1?Object.entries(sel||{}).map(([o,q])=>`${o}×${q}`).join('+'):(sel||'—');}).join(' · ');
-  pushCart({type:'package',title:p.cn,sub,img:p.img,qty:1,unit,needsCondiment:false,ref:{kind:'package',id:p.id}});
+  pushCart({type:'package',title:p.cn,sub,img:p.img,qty:1,unit,needsCondiment:false,
+    ref:{kind:'package',id:p.id,sel:JSON.parse(JSON.stringify(S.pkgSel)),up}});
   S.pkgId=null; S.pkgSel={}; S.pkgStep=0; S.pkgUp=false; toast(t('toast_cart')); go('orders');
 }
 window.cartQty=function(cid,d){ const c=S.cart.find(x=>x.cid===cid); if(!c)return; c.qty+=d; if(c.qty<=0)S.cart=S.cart.filter(x=>x.cid!==cid); render(); }
 window.cartRemove=function(cid){ S.cart=S.cart.filter(x=>x.cid!==cid); render(); }
 window.placeOrder=async function(){
-  if(!S.cart.length)return;
+  if(!S.cart.length || S.placing)return;
   if(!S.table){ toast(t('tbl_need')); go('pax'); return; }   // every order must carry a table
+  if(MenuSource.live()) return sendToPos();
   // Checkout is the one refresh that is mandatory, not best-effort — this is the
   // last chance to catch something that sold out mid-order. AVAILABILITY-PLAN §3.
   if(MenuSource.live()){
@@ -1295,6 +1311,49 @@ window.placeOrder=async function(){
   S.orders.unshift({ no, time:p2(d.getHours())+':'+p2(d.getMinutes()), status:t('status_prep'),
     items:S.cart.map(c=>({title:c.title,qty:c.qty,unit:c.unit})), condiment:cond, total });
   S.cart=[]; toast(t('toast_placed',no)); go('orders');
+}
+// Live: the order goes to the POS and prints in the kitchen, unpaid — guests pay
+// at the counter. The cart is only cleared once the POS confirms.
+async function sendToPos(){
+  S.placing=true; render();
+  try{
+    toast(t('so_checking'));
+    await refreshMenu('checkout',true);                       // last chance to catch sold-out items
+    if(soldOutInCart().length) return;                         // banner explains
+    const st=await PosOrder.shopStatus();
+    if(st.open===false){ toast(t('shop_closed'),4000); return; }
+    const cond=cartCondiment();
+    let built;
+    try{
+      built=PosOrder.build(S.cart,{ table:S.table, pax:S.pax, lang:S.lang, menu:M,
+        fees:{potFee:M.potFee, coldBase:DIRECT_BASE, upgrade:DIRECT_UPGRADE},
+        condimentQty: cond>0?S.pax:0, appTotal: cartItemsTotal()+cond });
+    }catch(e){ console.error('[order] build failed:',e.unmapped||e); toast(t('order_unmapped'),4500); return; }
+    const res=await PosOrder.submit(built.body);
+    if(!res.ok){ toast(t('order_fail'),4500); return; }
+    S.cart=[]; toast(t('toast_sent'),2500);
+    loadTableBill(); go('orders');
+  }catch(e){ console.error('[order] send failed:',e); toast(t('order_fail'),4500); }
+  finally{ S.placing=false; render(); }
+}
+
+// 本桌已点 — read from the POS, so it shows every phone's orders for the table
+// and clears itself once staff take payment.
+function loadTableBill(){
+  if(!MenuSource.live() || !S.table) return;
+  const table=S.table;
+  PosOrder.tableBill(table).then(b=>{ if(S.table!==table)return; S.bill={data:b}; if(S.screen==='orders')render(); })
+    .catch(e=>{ console.warn('[bill]',e); S.bill={error:true}; if(S.screen==='orders')render(); });
+}
+function tableBillSection(top){
+  const b=S.bill||{};
+  if(b.error) return `<div class="seclbl2" style="padding:${top}px 18px 0">${t('bill_t')}</div><div class="billnote">${t('bill_err')}</div>`;
+  if(!b.data) return '';
+  const lines=b.data.items.map(it=>`<div class="oline"><span>${S.lang==='en'?it.en:it.cn}${it.qty>1?` ×${it.qty}`:''}${it.opts.length?`<small class="bopts">${it.opts.join('、')}</small>`:''}</span><span>${money(it.amount)} ${C}</span></div>`).join('');
+  return `<div class="seclbl2" style="padding:${top}px 18px 0">${t('bill_t')} <small>${t('bill_sm',S.table)}</small></div>
+    <div class="histlist"><div class="ocard">${lines}
+      <div class="ofoot"><span class="ol">${t('bill_total')}</span><span class="otot">${money(b.data.total)} ${C}</span></div></div>
+    <div class="billnote">${t('bill_pay')}</div></div>`;
 }
 function orderCard(o){
   const lines=o.items.map(it=>`<div class="oline"><span>${it.title}${it.qty>1?` ×${it.qty}`:''}</span><span>${it.unit==null?t('mkt_price'):money(it.unit*it.qty)+' '+C}</span></div>`).join('')
@@ -1315,7 +1374,8 @@ function cartRow(c){
   </div>`;
 }
 function scrOrders(){
-  const hasCart=S.cart.length>0, hasHist=S.orders.length>0;
+  const live=MenuSource.live();
+  const hasCart=S.cart.length>0, hasHist=live ? !!(S.bill&&(S.bill.data||S.bill.error)) : S.orders.length>0;
   if(!hasCart && !hasHist){
     return `<div class="screen scroll">${topbar()}<div class="placeholder"><div class="pe">${ICO.orders('#cda968')}</div>
       <div style="font-size:18px;color:var(--gold2)">${t('empty_cart')}</div><div>${t('empty_cart_s')}</div>
@@ -1340,15 +1400,15 @@ function scrOrders(){
       ${cond>0?`<div class="srow"><span>${t('cond_fee',S.pax,money(cp))}</span><span>${money(cond)} ${C}</span></div>`:''}
       ${hasTBD?`<div class="srow tbd"><span>${t('tbd')}</span><span>${t('tbd_v')}</span></div>`:''}
       <div class="srow tot"><span>${t('total_line')}</span><span>${money(total)} ${C}</span></div></div>
-    <div class="cartcta"><button class="cta ${sold.length?'disabled':''}" onclick="${sold.length?'':'placeOrder()'}">${t('place_total',money(total),C)}</button></div>` : '';
-  const histSection = hasHist ? `
+    <div class="cartcta"><button class="cta ${sold.length||S.placing?'disabled':''}" onclick="${sold.length||S.placing?'':'placeOrder()'}">${S.placing?t('placing'):t('place_total',money(total),C)}</button></div>` : '';
+  const histSection = live ? (hasHist ? tableBillSection(hasCart?20:10) : '') : hasHist ? `
     <div class="seclbl2" style="padding:${hasCart?'20':'10'}px 18px 0">${t('sec_hist')} <small>ORDER HISTORY · ${S.orders.length}</small></div>
     <div class="histlist">${S.orders.map(orderCard).join('')}</div>` : '';
   return `<div class="screen scroll">${topbar()}${cartSection}${histSection}</div>`;
 }
-function toast(msg){
+function toast(msg,ms){
   let t=document.getElementById('toast'); if(!t){ t=document.createElement('div'); t.id='toast'; t.className='toast'; document.body.appendChild(t); }
-  t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1700);
+  t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),ms||1700);
 }
 
 function flowScreen(title,sub,content,enabled,ctaLabel,ctaAct){

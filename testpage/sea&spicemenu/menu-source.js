@@ -34,19 +34,78 @@
 (function () {
   'use strict';
 
-  // --- flip this to go live -------------------------------------------------
-  // false -> curated snapshot only (what the public demo ships with)
-  // true  -> snapshot + live ArmLoop prices/pluIds/availability
+  /* ==========================================================================
+     ★ 对接设定 POS CONNECTION SETTINGS — the only block that needs editing ★
+     ========================================================================== */
+
+  // false -> built-in menu only, orders are NOT sent (demo mode)
+  // true  -> live POS menu/prices/availability, and orders are sent to POS
   var USE_ARMLOOP = false;
+
+  // Which POS shop to talk to.
+  var ENV = 'production';   // 'production' | 'sandbox'
+
+  var SHOPS = {
+    // Real Sea & Spice shop. Values read from ArmLoop's existing ordering page
+    // config (seanspice.com.au) — ArmLoop to confirm, and to supply siteId.
+    production: {
+      // '' = same origin. The browser calls  https://www.sea-spice-hotpot.com/api/open/v1/...
+      // and the server forwards  /api/open/v1/*  ->  <ArmLoop API>/api/open/v1/*
+      // adding the X-API-KEY header. The key never appears in these files.
+      baseUrl:    '',
+      shopId:     '872ea4c06108b147ae0bc5c020c5c364',
+      spotId:     '6107722732739039',
+      siteId:     '1',          // TODO ArmLoop: confirm
+      terminalId: 'T003',
+      ordScan:    4000,
+      ordLot:     null,         // optional for the open/closed check (739 in their config)
+    },
+    // ArmLoop test shop. Orders here are always marked DO NOT PREPARE.
+    // Calling it straight from a browser fails (needs the key + duplicate
+    // Access-Control-Allow-Origin header), so it is for server-side/Node tests.
+    sandbox: {
+      baseUrl:    'https://proxy0.aclas.com.au/CTCOMM',
+      shopId:     '70bbab81bdfe62831ea6b4f266ecfc18',
+      spotId:     '62975427000220323116',
+      siteId:     '1',
+      terminalId: 'T001',
+      ordScan:    -999,
+      ordLot:     null,
+    },
+  };
+
+  // Tables as customers see them (POS floor plan) -> what is sent as plateNo/tabNo.
+  // Empty = send the table name as-is. Fill in only if ArmLoop uses other numbers,
+  // e.g. { '16A': '22', 'TEST': '99' }.
+  var TABLE_MAP = {};
+
+  // Charges in the app that have no POS item yet. Until ArmLoop creates them
+  // (and their PLU goes here) the order is sent WITHOUT them and the order
+  // note tells staff to add them at the counter.
+  var FEE_PLU = {
+    potFee:    '',   // 鱼火锅 / 单点火锅 锅底费 $30
+    coldBase:  '',   // 冷锅鱼 / 酸菜鱼 锅底费 $25
+    upgrade:   '',   // 升级鸳鸯锅 +$5
+  };
+  /* ======================================================================== */
+
+  // Lets a tester override any of the above without editing the file:
+  //   <script>window.SEASPICE_POS = { USE_ARMLOOP:true, ENV:'sandbox' }</script>
+  // placed before menu-source.js.
+  var OVR = (typeof window !== 'undefined' && window.SEASPICE_POS) || {};
+  if (typeof OVR.USE_ARMLOOP === 'boolean') USE_ARMLOOP = OVR.USE_ARMLOOP;
+  if (OVR.ENV) ENV = OVR.ENV;
+  var SHOP = Object.assign({}, SHOPS[ENV] || SHOPS.production, OVR.SHOP || {});
+  if (OVR.TABLE_MAP) TABLE_MAP = OVR.TABLE_MAP;
+  if (OVR.FEE_PLU) FEE_PLU = Object.assign({}, FEE_PLU, OVR.FEE_PLU);
 
   // --- ArmLoop connection ---------------------------------------------------
   var ARMLOOP = {
-    baseUrl:     'https://proxy0.aclas.com.au/CTCOMM',  // test server; swap for prod
+    baseUrl:     SHOP.baseUrl,
     // The X-API-KEY is NEVER hard-coded here — this file is served to browsers
-    // and View Source would leak it. It is injected at runtime instead:
-    //   window.ARMLOOP_KEY = '...'   (local testing only)
-    // In production ArmLoop proxies these calls server-side and attaches the
-    // header there; then baseUrl points at that proxy and no key is needed.
+    // and View Source would leak it. For local/Node testing only it can be
+    // injected as window.ARMLOOP_KEY; in production the server-side forward
+    // adds the header and no key exists in the browser at all.
     apiKey:      '',
     menuGroupNo: '',   // server returns the full menu when this is empty (verified)
     imageServer: '',   // imageUrl values are relative ("/PIC/0116.jpg")
@@ -71,6 +130,7 @@
     fishInfo:  '998',  // 鱼种介绍          -> display duplicates of cat 10
   };
 
+  var RAW = {};                      // pluId -> full POS object, from the last live fetch
   var STORE_KEY = 'seaspice_menu';   // admin overlay written by menu-admin.html
   var AVAIL_KEY = 'seaspice_avail';  // last-known availability, per §5 of the plan
   var AVAIL_MAX_AGE = 15 * 60 * 1000;   // beyond this, stop trusting the cache
@@ -179,6 +239,7 @@
       _priceList:  p.priceList,    // only entries with price!=0 or subName!='' are real
       _subMenu:    p.subMenu,      // 1 -> /shop/plu/submenu/v1 for option groups
       _spicy:      p.spicy,
+      _raw:        p,              // full POS object — the order builder sends this back
     };
   }
 
@@ -206,13 +267,24 @@
   }
 
   /* ========================================================================== */
-  function api(path, body) {
+  // Whole JSON response. Some endpoints answer in `map` (openClose, payOrder),
+  // others in `data`, so callers that need `map` use this directly.
+  function call(path, body) {
     var headers = { 'Content-Type': 'application/json' };
     var key = ARMLOOP.apiKey || (typeof window !== 'undefined' && window.ARMLOOP_KEY);
     if (key) headers['X-API-KEY'] = key;   // omitted when a server-side proxy adds it
     return fetch(ARMLOOP.baseUrl + path, {
       method: 'POST', headers: headers, body: JSON.stringify(body),
-    }).then(function (r) { return r.json(); }).then(function (j) {
+    }).then(function (r) {
+      return r.text().then(function (txt) {
+        try { return JSON.parse(txt); }
+        catch (e) { throw new Error('ArmLoop ' + path + ': HTTP ' + r.status + ', not JSON'); }
+      });
+    });
+  }
+
+  function api(path, body) {
+    return call(path, body).then(function (j) {
       // NOTE: ArmLoop reports success in `code`, not reliably in the HTTP status.
       if (!j || j.code !== 200) throw new Error('ArmLoop ' + path + ': ' + (j && (j.message || j.code)));
       return j.data;
@@ -233,6 +305,7 @@
           pluType: 0, showType: ARMLOOP.showType,
           virtualCategory: c.beingVirtual === 1 ? 1 : 0,
         }).then(function (d) {
+          (d.dataList || []).forEach(function (p) { RAW[String(p.pluId)] = p; });
           return { cat: c, items: (d.dataList || []).map(mapPlu) };
         });
       }));
@@ -286,6 +359,7 @@
       item._multiPrice = live._multiPrice;
       item._priceList  = live._priceList;
       item._subMenu    = live._subMenu;
+      item._raw        = live._raw;
       return item;
     }
 
@@ -404,5 +478,12 @@
     _applyCachedAvail: applyCachedAvail,
     _config:      ARMLOOP,
     _cats:        CAT,
+    // used by pos-order.js
+    _call:        call,
+    shop:         SHOP,
+    env:          ENV,
+    tableMap:     TABLE_MAP,
+    feePlu:       FEE_PLU,
+    rawPlu:       function (id) { return RAW[String(id)] || null; },
   };
 })();
