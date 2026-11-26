@@ -269,8 +269,9 @@
   /* ========================================================================== */
   // Whole JSON response. Some endpoints answer in `map` (openClose, payOrder),
   // others in `data`, so callers that need `map` use this directly.
-  function call(path, body) {
-    var headers = { 'Content-Type': 'application/json' };
+  // extra: optional headers, e.g. { Authorization: <member userId> } after member login
+  function call(path, body, extra) {
+    var headers = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
     var key = ARMLOOP.apiKey || (typeof window !== 'undefined' && window.ARMLOOP_KEY);
     if (key) headers['X-API-KEY'] = key;   // omitted when a server-side proxy adds it
     return fetch(ARMLOOP.baseUrl + path, {

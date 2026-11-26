@@ -193,7 +193,9 @@
 
   /* ------------------------------------------------------------------- build */
   // cart: the app's cart lines. ctx: { table, pax, lang, menu, fees:{potFee,coldBase,upgrade},
-  //   condimentQty, appTotal }
+  //   condimentQty, appTotal, member?:{userId,name,mobile} }
+  // With a member, the order carries their userId/memberId so the POS credits
+  // points when the bill is settled.
   // Returns { body, bill, total, warnings[], missingFees[] } or throws with
   // err.unmapped = [names] when something in the cart has no POS item.
   function build(cart, ctx) {
@@ -318,6 +320,10 @@
         return m.label + ' $' + (m.amount != null ? m.amount.toFixed(2) : '?') + (m.qty > 1 ? ' ×' + m.qty : '');
       }).join('、') + '（POS 尚无此品项）');
     }
+    var mem = ctx.member && ctx.member.userId ? ctx.member : null;
+    var memFirst = mem ? (mem.name || 'Member') : 'Table', memLast = mem ? '' : table;
+    var memPhone = mem && mem.mobile ? mem.mobile : PLACEHOLDER_PHONE;
+    if (mem) notes.push('会员 ' + (mem.name || '') + ' ' + (mem.mobile || ''));
     var cartId = uid(), billNo = uid(), deviceId = uid();
     var stamp = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
     var hm = pad(now.getHours()) + ':' + pad(now.getMinutes());
@@ -328,6 +334,7 @@
       persons: ctx.pax || 1, plateNo: tn, plateName: table,
       gst: r2(gst), tax1: gst, itemList: items, transactionId: uid(),
       notes: notes.filter(Boolean).join(' · '),
+      userId: mem ? mem.userId : null,
       totalPointableAmount: total, totalPointedAmount: total,
       ordScan: s.ordScan, shopId: s.shopId, spotId: s.spotId, shopName: 'Sea &Spice',
       device: deviceId, terminalId: s.terminalId, lang: ctx.lang || 'cn',
@@ -341,8 +348,8 @@
         timeLine: Math.floor(ts / 1000),
       },
       clientInfo: {
-        firstName: 'Table', lastName: table, email: '', address: '',
-        mobilePhone: PLACEHOLDER_PHONE, mobile: PLACEHOLDER_PHONE, zipCode: 0, countryCode: '+61', scanUrl: '', ordScan: -1,
+        firstName: memFirst, lastName: memLast, email: '', address: '',
+        mobilePhone: memPhone, mobile: memPhone, zipCode: 0, countryCode: '+61', scanUrl: '', ordScan: -1,
       },
     });
 
@@ -357,7 +364,8 @@
       sendOrderWhenPaid: 'false',
       surchargeType: 0, merchantSurcharge: '0', merchantOrderId: billNo,
       cartId: cartId, createdTimestamp: ts, lastUpdated: ts,
-      firstName: 'Table', lastName: table, phoneNumber: PLACEHOLDER_PHONE, email: '',
+      firstName: memFirst, lastName: memLast, phoneNumber: memPhone, email: '',
+      userId: mem ? mem.userId : '', memberId: mem ? mem.userId : '',
       billInfo: b64(JSON.stringify(bill)),
     };
 
@@ -379,11 +387,75 @@
     });
   }
 
+  /* ------------------------------------------------------------------ member */
+  // Login is phone + password (POS /pro/al/user/signIn). Afterwards the member's
+  // userId is the token: ArmLoop's own ordering site sends it as the
+  // Authorization header on member calls, and so do we.
+  // Points are NOT added here. Orders carry the member's userId/memberId and the
+  // POS credits points when the table's bill is settled at the counter.
+  function pickRtn(j) { var d = (j && j.data && typeof j.data === 'object') ? j.data : {}, m = (j && j.map) || {}; return { d: d, m: m, rtn: typeof d.rtn === 'number' ? d.rtn : m.rtn }; }
+
+  function memberSignIn(mobile, pwd) {
+    mobile = String(mobile || '').replace(/\D/g, '');
+    return MS._call(V1 + '/pro/al/user/signIn', { loginName: mobile, mobile: mobile, pwd: pwd }).then(function (j) {
+      var r = pickRtn(j), userId = r.d.userId || r.m.userId;
+      if (!(r.rtn > 0) || !userId) {
+        return { ok: false, notFound: r.rtn === -821009, msg: r.d.dispMsg || r.m.disp_msg || r.m.dispMsg || (j && j.message) || '' };
+      }
+      var det = r.d.detail || r.m.detail || {};
+      return { ok: true, userId: String(userId), mobile: det.mobile || mobile,
+               name: [det.firstName, det.lastName].filter(Boolean).join(' ') };
+    });
+  }
+
+  function auth(userId) { return { Authorization: userId }; }
+
+  // Name / mobile, when signIn did not return them.
+  function memberDetail(userId) {
+    return MS._call(V1 + '/pro/account/detail', { userId: userId }, auth(userId)).then(function (j) {
+      var d = (j && j.data && typeof j.data === 'object') ? (j.data.detail || j.data) : {};
+      return { name: [d.firstName, d.lastName].filter(Boolean).join(' '), mobile: d.mobile || '' };
+    }).catch(function () { return {}; });
+  }
+
+  // Points and stored balance from the member's LOYALTY card(s).
+  // Returns { points, balance } or null when the POS gives nothing usable.
+  function memberPoints(userId) {
+    return MS._call(V1 + '/pro/account/loadUserValuePass', {
+      action: 'WALLET', userId: userId, siteId: shop().siteId, cardTypeRange: 'LOYALTY', pageSize: 20, startRow: 0,
+    }, auth(userId)).then(function (j) {
+      if (!j || j.code !== 200 || typeof j.data !== 'object' || !j.data) return null;
+      var pts = null, bal = null;
+      (function walk(o) {                       // cards nest a JSON string (cardInfo); find the numbers wherever they sit
+        if (!o || typeof o !== 'object') return;
+        if (typeof o.cardInfo === 'string') { try { walk(JSON.parse(o.cardInfo)); } catch (e) {} }
+        if (typeof o.loyaltyPoints === 'number') pts = (pts || 0) + o.loyaltyPoints;
+        if (typeof o.pointFinal === 'number' && pts == null) pts = o.pointFinal;
+        if (typeof o.dollarBalance === 'number') bal = (bal || 0) + o.dollarBalance;
+        Object.keys(o).forEach(function (k) { if (o[k] && typeof o[k] === 'object') walk(o[k]); });
+      })(j.data);
+      return (pts == null && bal == null) ? null : { points: pts, balance: bal };
+    }).catch(function () { return null; });
+  }
+
+  // The shop's points rule: { on, perDollar, redeemPer, minimum }.
+  function pointsRule() {
+    return MS._call(V1 + '/pro/lot/set/getMemberPoints', { siteId: shop().siteId }).then(function (j) {
+      var d = j && j.data;
+      if (!d || typeof d !== 'object') return null;
+      return { on: d.state === 1, perDollar: d.pointsPerDollar, redeemPer: d.pointsPerDollarWhenRedeem, minimum: d.minimumPoints };
+    }).catch(function () { return null; });
+  }
+
   window.PosOrder = {
     shopStatus: shopStatus,
     tableBill:  tableBill,
     build:      build,
     submit:     submit,
+    memberSignIn: memberSignIn,
+    memberDetail: memberDetail,
+    memberPoints: memberPoints,
+    pointsRule:   pointsRule,
     TEST_TABLE: TEST_TABLE,
     TEST_NOTE:  TEST_NOTE,
     live:       function () { return MS.live(); },
